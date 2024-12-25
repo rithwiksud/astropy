@@ -4,6 +4,7 @@ This module contains the FITS compression algorithms in numcodecs style Codecs.
 
 from gzip import compress as gzip_compress
 from gzip import decompress as gzip_decompress
+from imagecodecs import jpegls_encode, jpegls_decode
 
 import numpy as np
 
@@ -15,6 +16,8 @@ from astropy.io.fits.hdu.compressed._compression import (
     decompress_plio_1_c,
     decompress_rice_1_c,
 )
+
+from .settings import DEFAULT_JPEGLS_MAXERR
 
 # If numcodecs is installed, we use Codec as a base class for the codecs below
 # so that they can optionally be used as codecs in any package relying on
@@ -36,6 +39,7 @@ __all__ = [
     "HCompress1",
     "NoCompress",
     "Rice1",
+    "JPEGLS"
 ]
 
 
@@ -451,3 +455,72 @@ class HCompress1(Codec):
         return compress_hcompress_1_c(
             dbytes, self.nx, self.ny, self.scale, self.bytepix
         )
+
+    
+class JPEGLS(Codec):
+    """
+    The JPEG-LS (Lossless and Near-Lossless JPEG) compression and decompression algorithm.
+    JPEG-LS is an ISO/IEC standard (14495-1) for lossless and near-lossless compression 
+    of continuous-tone images. It was developed to provide a low-complexity lossless and
+    near-lossless image compression standard that could outperform other standards like 
+    JPEG for specific types of images.
+
+    The algorithm uses a very efficient adaptive prediction, context modeling, and 
+    Golomb coding. It is particularly effective for medical, scientific, and natural 
+    images with minimal noise. JPEG-LS achieves excellent compression ratios while 
+    maintaining very low computational complexity.
+
+    Parameters
+    ----------
+    max_err
+        The near-lossless maximum error parameter. When set to 0, the compression
+        is fully lossless, meaning the decompressed image will be bit-for-bit
+        identical to the original. Values greater than 0 enable near-lossless
+        compression, where each reconstructed sample differs from the original by
+        no more than the specified error value. Default value is 0.
+
+    References
+    ----------
+        [1] Weinberger, M. J., Seroussi, G., & Sapiro, G. (2000). The LOCO-I lossless 
+           image compression algorithm: Principles and standardization into JPEG-LS. 
+           IEEE Transactions on Image Processing, 9(8), 1309-1324.
+    """
+
+    codec_id = "JPEGLS"
+
+    def __init__(self, *, max_err: int = DEFAULT_JPEGLS_MAXERR):
+        self.max_err = max_err
+
+    def decode(self, buf):
+        """
+        Decompress buffer using the JPEG-LS algorithm.
+
+        Parameters
+        ----------
+        buf : bytes or array_like
+            The buffer to decompress.
+
+        Returns
+        -------
+        buf : np.ndarray
+            The decompressed buffer.
+        """
+        cbytes = np.frombuffer(_as_native_endian_array(buf), dtype=np.uint8).tobytes()
+        return jpegls_decode(cbytes)
+
+    def encode(self, buf):
+        """
+        Compress the data in the buffer using the JPEG-LS algorithm.
+
+        Parameters
+        ----------
+        buf : bytes or array_like
+            The buffer to compress.
+
+        Returns
+        -------
+        bytes
+            The compressed bytes.
+        """
+        assert buf.dtype == np.uint16 or buf.dtype == np.uint8, "JPEG-LS can only compress integer data."
+        return jpegls_encode(buf, level=self.max_err)

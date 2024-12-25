@@ -91,7 +91,29 @@ def _validate_tile_shape(*, tile_shape, compression_type, image_header):
         remain = image_header["NAXIS2"] % tile_shape[-2]  # 2nd dimen
         if 0 < remain < 4:
             raise ValueError("Last tile along 2nd dimension has less than 4 pixels")
+            
+    elif compression_type == "JPEGLS":
+        if tile_shape:
+            major_dims = len([ts for ts in tile_shape if ts > 1])
+            if major_dims > 2:
+                raise ValueError(
+                    "JPEGLS can only support 2-dimensional tile sizes."
+                    "All but two of the tile_shape dimensions must be set "
+                    "to 1."
+                )
+        else:
+            # For now, there is no tiling used for JPEG-LS as it is fast.
+            # If JPEG-LS ever becomes too slow and tiling is needed,
+            # Tile shape 512 by 512 is recommended, as shown by testing in
+            # https://openreview.net/forum?id=kQCHCkNk7s&nesting=2&sort=date-desc
+            
+            tile_shape[-1] = min(image_header["NAXIS1"], 2048)
+            tile_shape[-2] = min(image_header["NAXIS2"], 2048)
 
+            for i in range(2, naxis):
+                # set all higher tile dimensions = 1
+                tile_shape[i] = 1
+            
     if len(tile_shape) == 0 and image_header["NAXIS"] > 0:
         tile_shape = [1] * (naxis - 1) + [image_header["NAXIS1"]]
 

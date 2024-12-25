@@ -22,6 +22,7 @@ from .settings import (
     QUANTIZE_METHOD_NAMES,
     SUBTRACTIVE_DITHER_1,
     SUBTRACTIVE_DITHER_2,
+    DEFAULT_JPEGLS_MAXERR,
 )
 from .utils import _validate_tile_shape
 
@@ -250,6 +251,7 @@ def _image_header_to_empty_bintable(
     dither_seed=None,
     axes=None,
     generate_dither_seed=None,
+    jpegls_maxerr=None,
 ):
     bintable = _CompBinTableHDU()
 
@@ -499,6 +501,13 @@ def _image_header_to_empty_bintable(
         )
         after_keyword = "ZVAL2"
         idx = 3
+    elif compression_type == "JPEGLS":
+        bintable.header.set(
+            "ZNAME1", "MAXERR", "maximum per-pixel error", after=after_keyword
+        )
+        bintable.header.set(
+            "ZVAL1", DEFAULT_JPEGLS_MAXERR, "maximum per-pixel error", after="ZNAME1"
+        )
 
     if image_header["BITPIX"] < 0:  # floating point image
         bintable.header.set(

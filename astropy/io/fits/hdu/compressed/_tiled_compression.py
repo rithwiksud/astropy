@@ -11,9 +11,10 @@ import numpy as np
 
 from astropy.io.fits.hdu.base import BITPIX2DTYPE
 
-from ._codecs import PLIO1, Gzip1, Gzip2, HCompress1, NoCompress, Rice1
+from ._codecs import PLIO1, Gzip1, Gzip2, HCompress1, NoCompress, Rice1, JPEGLS
 from ._quantization import DITHER_METHODS, QuantizationFailedException, Quantize
 from .utils import _data_shape, _iter_array_tiles, _tile_shape
+from .settings import DEFAULT_JPEGLS_MAXERR
 
 ALGORITHMS = {
     "GZIP_1": Gzip1,
@@ -23,6 +24,7 @@ ALGORITHMS = {
     "PLIO_1": PLIO1,
     "HCOMPRESS_1": HCompress1,
     "NOCOMPRESS": NoCompress,
+    "JPEGLS": JPEGLS,
 }
 
 DEFAULT_ZBLANK = -2147483648
@@ -81,6 +83,8 @@ def _header_to_settings(header):
         settings["bytepix"] = 8
         settings["scale"] = int(_get_compression_setting(header, "SCALE", 0))
         settings["smooth"] = _get_compression_setting(header, "SMOOTH", 0)
+    elif compression_type == "JPEGLS":
+        settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_JPEGLS_MAXERR)
 
     return settings
 
@@ -136,6 +140,8 @@ def _finalize_array(tile_buffer, *, bitpix, tile_shape, algorithm, lossless):
             # Just return the raw bytes
             dtype = ">u1"
         tile_data = np.asarray(tile_buffer).view(dtype).reshape(tile_shape)
+    elif algorithm == "JPEGLS":
+        return tile_data
     else:
         # For RICE_1 compression the tiles that are on the edge can end up
         # being padded, so we truncate excess values
