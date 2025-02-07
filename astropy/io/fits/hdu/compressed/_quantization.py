@@ -140,3 +140,77 @@ class Quantize:
             raise QuantizationFailedException()
         else:
             return np.frombuffer(qbytes, dtype=np.int32), scale, zero
+
+
+def quantize_integer_arr(arr: np.ndarray, max_err: int, mask: np.ndarray, nbits: int = 16) -> np.ndarray:
+    """
+    Only applied to quantizing integer data for near-lossless compression.
+    Quantize array values within a maximum error bound where specified by a mask.
+    
+    Quantization reduces precision of values to improve compressibility while ensuring
+    the difference between original and quantized values does not exceed max_err.
+    Only values below (2^nbits - max_err) are quantized to prevent overflow.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Array to quantize. Can be 2D, 3D, or 4D. The two largest dimensions
+        are assumed to be spatial dimensions that the mask applies to.
+    max_err : int
+        Maximum allowed difference between original and quantized values.
+        Must be positive.
+    mask : np.ndarray, optional
+        2D boolean array indicating which spatial pixels to quantize.
+        True values indicate pixels that should be quantized. If None, assumes
+        all pixels are to be quantized. Default is None.
+    nbits : int, optional
+        Bit depth of the data. Used to determine maximum safe value for
+        quantization. Default is 16.
+
+    Returns
+    -------
+    np.ndarray
+        Quantized array with the same shape as input arr. Values where
+        mask is False or where original values are too large remain unchanged.
+
+    Raises
+    ------
+    AssertionError
+        If mask is provided but is not 2D.
+    ValueError
+        If arr has unsupported dimensionality or mismatched spatial dimensions with the mask.
+    """
+    # Input validation
+    assert max_err > 0, f"max_err must be positive, got {max_err}"
+    if arr.ndim not in [2, 3, 4]:
+        raise ValueError(f"Array must be 2D, 3D or 4D, got shape {arr.shape}")
+    
+    # Identify spatial dimensions (two largest dimensions)
+    spatial_dims = np.argsort(arr.shape)[-2:]  # Indices of the two largest dimensions
+    spatial_shape = (arr.shape[spatial_dims[0]], arr.shape[spatial_dims[1]])
+    
+    # Handle the case where mask is None
+    if mask is None:
+        mask = np.ones(spatial_shape, dtype=bool)  # Default mask with all True values
+    else:
+        # Verify that the mask matches spatial dimensions
+        assert mask.ndim == 2, f"Mask must be 2D, got shape {mask.shape}"
+        if mask.shape != spatial_shape:
+            raise ValueError(f"Mask shape {mask.shape} must match spatial dimensions {spatial_shape} of the array.")
+    
+    # Expand the mask to match the shape of the array using slicing
+    expanded_mask = mask[(slice(None),) * spatial_dims[0] + np.index_exp[:] + (slice(None),) * (arr.ndim - spatial_dims[1] - 1)]
+    
+    # Prevent modifying values too large for safe quantization
+    max_safe_value = 2**nbits - 1 - max_err
+    not_too_big = arr <= max_safe_value  # Mask of safely quantizable values
+    
+    # Combine mask conditions
+    combined_mask = expanded_mask & not_too_big
+    
+    # Perform quantization
+    quantized_data = np.copy(arr)
+    quant_size = 2 * max_err + 1  # Distance between quantization levels
+    quantized_data[combined_mask] = (arr[combined_mask] // quant_size) * quant_size + max_err
+
+    return quantized_data

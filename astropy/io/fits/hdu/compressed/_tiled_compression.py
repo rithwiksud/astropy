@@ -14,7 +14,7 @@ from astropy.io.fits.hdu.base import BITPIX2DTYPE
 from ._codecs import PLIO1, Gzip1, Gzip2, HCompress1, NoCompress, Rice1, JPEGLS
 from ._quantization import DITHER_METHODS, QuantizationFailedException, Quantize
 from .utils import _data_shape, _iter_array_tiles, _tile_shape
-from .settings import DEFAULT_JPEGLS_MAXERR
+from .settings import DEFAULT_NEAR_LOSSLESS_MAXERR
 
 ALGORITHMS = {
     "GZIP_1": Gzip1,
@@ -84,7 +84,7 @@ def _header_to_settings(header):
         settings["scale"] = int(_get_compression_setting(header, "SCALE", 0))
         settings["smooth"] = _get_compression_setting(header, "SMOOTH", 0)
     elif compression_type == "JPEGLS":
-        settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_JPEGLS_MAXERR)
+        settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_NEAR_LOSSLESS_MAXERR)
 
     return settings
 

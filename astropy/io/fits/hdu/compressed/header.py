@@ -22,7 +22,7 @@ from .settings import (
     QUANTIZE_METHOD_NAMES,
     SUBTRACTIVE_DITHER_1,
     SUBTRACTIVE_DITHER_2,
-    DEFAULT_JPEGLS_MAXERR,
+    DEFAULT_NEAR_LOSSLESS_MAXERR,
 )
 from .utils import _validate_tile_shape
 
@@ -506,7 +506,7 @@ def _image_header_to_empty_bintable(
             "ZNAME1", "MAXERR", "maximum per-pixel error", after=after_keyword
         )
         bintable.header.set(
-            "ZVAL1", DEFAULT_JPEGLS_MAXERR, "maximum per-pixel error", after="ZNAME1"
+            "ZVAL1", DEFAULT_NEAR_LOSSLESS_MAXERR, "maximum per-pixel error", after="ZNAME1"
         )
 
     if image_header["BITPIX"] < 0:  # floating point image
