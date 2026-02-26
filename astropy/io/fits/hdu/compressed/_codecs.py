@@ -4,7 +4,12 @@ This module contains the FITS compression algorithms in numcodecs style Codecs.
 
 from gzip import compress as gzip_compress
 from gzip import decompress as gzip_decompress
-from imagecodecs import jpegls_encode, jpegls_decode, jpegxl_encode, jpegxl_decode
+try:
+    from imagecodecs import jpegls_decode, jpegls_encode, jpegxl_decode, jpegxl_encode
+
+    HAS_IMAGECODECS = True
+except ImportError:
+    HAS_IMAGECODECS = False
 
 import numpy as np
 
@@ -41,7 +46,8 @@ __all__ = [
     "HCompress1",
     "NoCompress",
     "Rice1",
-    "JPEGLS"
+    "JPEGLS",
+    "JPEGXL",
 ]
 
 
@@ -493,6 +499,11 @@ class JPEGLS(Codec):
     codec_id = "JPEGLS"
 
     def __init__(self, *, max_err: int = DEFAULT_NEAR_LOSSLESS_MAXERR):
+        if not HAS_IMAGECODECS:
+            raise ImportError(
+                "The 'imagecodecs' package is required for JPEG-LS compression. "
+                "Install it with: pip install imagecodecs"
+            )
         self.max_err = max_err
 
     def decode(self, buf):
@@ -526,7 +537,16 @@ class JPEGLS(Codec):
         bytes
             The compressed bytes.
         """
-        assert buf.dtype == np.uint16 or buf.dtype == np.uint8, "JPEG-LS can only compress integer data."
+        if buf.dtype == np.int16:
+            # Arithmetic conversion to unsigned: same method as CFITSIO (+32768)
+            buf = (buf.astype(np.int32) + 32768).astype(np.uint16)
+        elif buf.dtype == np.int8:
+            buf = (buf.astype(np.int16) + 128).astype(np.uint8)
+        assert buf.dtype in (np.uint16, np.uint8), "JPEG-LS can only compress 8/16-bit integer data."
+        # Squeeze leading size-1 dimensions so imagecodecs sees a 2D image
+        buf = np.squeeze(buf)
+        if buf.ndim < 2:
+            buf = buf.reshape(1, -1)
         return jpegls_encode(buf, level=self.max_err)
 
 
@@ -572,6 +592,11 @@ class JPEGXL(Codec):
     codec_id = "JPEGXL"
 
     def __init__(self, *, effort: int = DEFAULT_JPEGXL_EFFORT, max_err: int = DEFAULT_NEAR_LOSSLESS_MAXERR, quantization_mask: np.ndarray = None):
+        if not HAS_IMAGECODECS:
+            raise ImportError(
+                "The 'imagecodecs' package is required for JPEG-XL compression. "
+                "Install it with: pip install imagecodecs"
+            )
         self.max_err = max_err
         self.effort = effort
         self.quantization_mask = quantization_mask
@@ -608,6 +633,12 @@ class JPEGXL(Codec):
             The compressed bytes.
         """
 
+        if buf.dtype == np.int16:
+            # Arithmetic conversion to unsigned: same method as CFITSIO (+32768)
+            buf = (buf.astype(np.int32) + 32768).astype(np.uint16)
+        elif buf.dtype == np.int8:
+            buf = (buf.astype(np.int16) + 128).astype(np.uint8)
+
         if self.max_err > 0:
             if buf.dtype == np.uint8:
                 nbits = 8
@@ -615,7 +646,11 @@ class JPEGXL(Codec):
                 nbits = 16
             else:
                 raise RuntimeError("JPEG-XL near-lossless mode can only compress integer data. Set max_error=0 to compress floats.")
-                
+
             buf = quantize_integer_arr(buf, self.max_err, self.quantization_mask, nbits)
-            
-        return jpegxl_encode(buf, effort=self.effort)
+
+        # Squeeze leading size-1 dimensions so imagecodecs sees a 2D image
+        buf = np.squeeze(buf)
+        if buf.ndim < 2:
+            buf = buf.reshape(1, -1)
+        return jpegxl_encode(buf, lossless=True, effort=self.effort)

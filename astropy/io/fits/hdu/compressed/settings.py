@@ -20,6 +20,7 @@ COMPRESSION_TYPES = (
     "PLIO_1",
     "HCOMPRESS_1",
     "JPEGLS",
+    "JPEGXL",
 )
 
 # Default compression parameter values

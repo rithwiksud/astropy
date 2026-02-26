@@ -11,10 +11,10 @@ import numpy as np
 
 from astropy.io.fits.hdu.base import BITPIX2DTYPE
 
-from ._codecs import PLIO1, Gzip1, Gzip2, HCompress1, NoCompress, Rice1, JPEGLS
+from ._codecs import PLIO1, Gzip1, Gzip2, HCompress1, NoCompress, Rice1, JPEGLS, JPEGXL
 from ._quantization import DITHER_METHODS, QuantizationFailedException, Quantize
 from .utils import _data_shape, _iter_array_tiles, _tile_shape
-from .settings import DEFAULT_NEAR_LOSSLESS_MAXERR
+from .settings import DEFAULT_NEAR_LOSSLESS_MAXERR, DEFAULT_JPEGXL_EFFORT
 
 ALGORITHMS = {
     "GZIP_1": Gzip1,
@@ -25,6 +25,7 @@ ALGORITHMS = {
     "HCOMPRESS_1": HCompress1,
     "NOCOMPRESS": NoCompress,
     "JPEGLS": JPEGLS,
+    "JPEGXL": JPEGXL,
 }
 
 DEFAULT_ZBLANK = -2147483648
@@ -85,6 +86,9 @@ def _header_to_settings(header):
         settings["smooth"] = _get_compression_setting(header, "SMOOTH", 0)
     elif compression_type == "JPEGLS":
         settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_NEAR_LOSSLESS_MAXERR)
+    elif compression_type == "JPEGXL":
+        settings["effort"] = _get_compression_setting(header, "EFFORT", DEFAULT_JPEGXL_EFFORT)
+        settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_NEAR_LOSSLESS_MAXERR)
 
     return settings
 
@@ -140,8 +144,12 @@ def _finalize_array(tile_buffer, *, bitpix, tile_shape, algorithm, lossless):
             # Just return the raw bytes
             dtype = ">u1"
         tile_data = np.asarray(tile_buffer).view(dtype).reshape(tile_shape)
-    elif algorithm == "JPEGLS":
-        return tile_data
+    elif algorithm in ("JPEGLS", "JPEGXL"):
+        decoded = np.asarray(tile_buffer)
+        if bitpix == 16:
+            # Reverse the +32768 arithmetic conversion applied during encode
+            decoded = (decoded.view(np.uint16).astype(np.int32) - 32768).astype(np.int16)
+        return decoded.reshape(tile_shape)
     else:
         # For RICE_1 compression the tiles that are on the edge can end up
         # being padded, so we truncate excess values
