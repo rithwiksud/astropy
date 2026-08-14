@@ -20,7 +20,6 @@ COMPRESSION_TYPES = (
     "PLIO_1",
     "HCOMPRESS_1",
     "JPEGLS",
-    "JPEGXL",
 )
 
 # Default compression parameter values
@@ -33,11 +32,8 @@ DEFAULT_HCOMP_SMOOTH = 0
 DEFAULT_BLOCK_SIZE = 32
 DEFAULT_BYTE_PIX = 4
 
-# Maximum error metric for near-lossless modes of compression
-# Only compatible with JPEGLS and JPEGXL
+# Maximum error metric for near-lossless mode of JPEGLS compression
 DEFAULT_NEAR_LOSSLESS_MAXERR = 0
-
-DEFAULT_JPEGXL_EFFORT = 7
 
 CMTYPE_ALIASES = {"RICE_ONE": "RICE_1"}
 

@@ -23,7 +23,6 @@ from .settings import (
     SUBTRACTIVE_DITHER_1,
     SUBTRACTIVE_DITHER_2,
     DEFAULT_NEAR_LOSSLESS_MAXERR,
-    DEFAULT_JPEGXL_EFFORT,
 )
 from .utils import _validate_tile_shape
 
@@ -253,7 +252,6 @@ def _image_header_to_empty_bintable(
     axes=None,
     generate_dither_seed=None,
     jpegls_maxerr=None,
-    jpegxl_effort=None,
 ):
     bintable = _CompBinTableHDU()
 
@@ -520,23 +518,6 @@ def _image_header_to_empty_bintable(
             jpegls_maxerr if jpegls_maxerr is not None else DEFAULT_NEAR_LOSSLESS_MAXERR,
             "maximum per-pixel error",
             after="ZNAME1",
-        )
-    elif compression_type == "JPEGXL":
-        _effort = jpegxl_effort if jpegxl_effort is not None else DEFAULT_JPEGXL_EFFORT
-        bintable.header.set(
-            "ZNAME1", "EFFORT", "JPEG-XL encoder effort (1-9)", after=after_keyword
-        )
-        bintable.header.set(
-            "ZVAL1", _effort, "JPEG-XL encoder effort (1-9)", after="ZNAME1"
-        )
-        bintable.header.set(
-            "ZNAME2", "MAXERR", "maximum per-pixel error", after="ZVAL1"
-        )
-        bintable.header.set(
-            "ZVAL2",
-            jpegls_maxerr if jpegls_maxerr is not None else DEFAULT_NEAR_LOSSLESS_MAXERR,
-            "maximum per-pixel error",
-            after="ZNAME2",
         )
 
     if image_header["BITPIX"] < 0:  # floating point image

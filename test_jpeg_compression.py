@@ -1,7 +1,7 @@
 """
-Comprehensive parametrized test suite for JPEG-LS and JPEG-XL compression in Astropy FITS.
+Comprehensive parametrized test suite for JPEG-LS compression in Astropy FITS.
 
-Covers all combinations of shape × dtype × codec, with xfail markers for
+Covers all combinations of shape x dtype, with xfail markers for
 unsupported combinations.
 """
 
@@ -60,28 +60,19 @@ def compress_decompress(data, compression_type, **kwargs):
 # ---------------------------------------------------------------------------
 
 def _jpegls_xfail_reason(shape, dtype):
-    """Return an xfail reason string if this (shape, dtype) combo is not supported by JPEG-LS, else None."""
+    """Return an xfail reason string if this (shape, dtype) combo is not
+    exactly round-trippable by JPEG-LS, else None."""
     # FITS has no BITPIX for float16
     if dtype == np.float16:
         return "float16 has no FITS BITPIX representation"
-    # JPEG-LS only handles 8/16-bit integers
+    # Floats round-trip through lossy quantization (default quantize_level),
+    # so they are not bit-exact unless quantize_level=0 is passed explicitly.
     if np.issubdtype(dtype, np.floating):
-        return "JPEG-LS only supports 8/16-bit integer data; floats are not supported"
-    if dtype in (np.int32, np.uint32, np.int64, np.uint64):
-        return "JPEG-LS only supports 8/16-bit integer data; 32/64-bit integers are not supported"
-    return None
-
-
-def _jpegxl_xfail_reason(shape, dtype):
-    """Return an xfail reason string if this (shape, dtype) combo is not supported by JPEG-XL, else None."""
-    # FITS has no BITPIX for float16
-    if dtype == np.float16:
-        return "float16 has no FITS BITPIX representation"
-    # JPEG-XL only handles 8/16-bit int and 32-bit float (imagecodecs does not support float64)
-    if dtype in (np.int32, np.uint32, np.int64, np.uint64):
-        return "JPEG-XL only supports 8/16-bit int and float32; 32/64-bit integers are not supported"
-    if dtype == np.float64:
-        return "imagecodecs jpegxl does not support float64"
+        return "floats round-trip lossily via quantization, not bit-exact by default"
+    # JPEG-LS supports 8/16-bit directly and 32-bit via the split-plane
+    # container; 64-bit integers have no path.
+    if dtype in (np.int64, np.uint64):
+        return "JPEG-LS has no 64-bit integer path"
     return None
 
 
@@ -89,37 +80,26 @@ def _jpegxl_xfail_reason(shape, dtype):
 # Core round-trip test
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("compression_type", ["JPEGLS", "JPEGXL"])
 @pytest.mark.parametrize("dtype", ALL_DTYPES, ids=[np.dtype(d).name for d in ALL_DTYPES])
 @pytest.mark.parametrize("shape", ALL_SHAPES, ids=[str(s) for s in ALL_SHAPES])
-def test_roundtrip(shape, dtype, compression_type):
+def test_roundtrip(shape, dtype):
     """Data compressed and decompressed round-trips to exact equality."""
-    if compression_type == "JPEGLS":
-        reason = _jpegls_xfail_reason(shape, dtype)
-    else:
-        reason = _jpegxl_xfail_reason(shape, dtype)
-
+    reason = _jpegls_xfail_reason(shape, dtype)
     if reason is not None:
         pytest.xfail(reason)
 
     data = make_data(shape, dtype)
 
-    # JPEGXL encodes floats natively (no quantization); default quantize_level=16
-    # would convert float→int32 before the codec, which JPEGXL cannot handle.
-    kwargs = {}
-    if compression_type == "JPEGXL" and np.issubdtype(dtype, np.floating):
-        kwargs["quantize_level"] = 0
-
     try:
-        result, _ = compress_decompress(data, compression_type, **kwargs)
+        result, _ = compress_decompress(data, "JPEGLS")
     except Exception as exc:
         # Surface unexpected errors as test failures with context
-        pytest.fail(f"{compression_type} {dtype} {shape} raised: {exc}")
+        pytest.fail(f"JPEGLS {dtype} {shape} raised: {exc}")
 
     np.testing.assert_array_equal(
         data,
         result,
-        err_msg=f"{compression_type} round-trip failed for dtype={dtype} shape={shape}",
+        err_msg=f"JPEGLS round-trip failed for dtype={dtype} shape={shape}",
     )
 
 
@@ -127,30 +107,16 @@ def test_roundtrip(shape, dtype, compression_type):
 # Compression-ratio test (only large tiles where compression is meaningful)
 # ---------------------------------------------------------------------------
 
-_RATIO_DTYPES = [np.int16, np.uint16, np.float32, np.float64]
+_RATIO_DTYPES = [np.int16, np.uint16, np.int32, np.uint32]
 _RATIO_SHAPE = (1024, 1024)
 
-@pytest.mark.parametrize("compression_type", ["JPEGLS", "JPEGXL"])
 @pytest.mark.parametrize("dtype", _RATIO_DTYPES, ids=[np.dtype(d).name for d in _RATIO_DTYPES])
-def test_better_ratio_than_rice(dtype, compression_type):
-    """JPEG codecs must compress a 1024×1024 array better than RICE_1."""
-    if compression_type == "JPEGLS":
-        reason = _jpegls_xfail_reason(_RATIO_SHAPE, dtype)
-    else:
-        reason = _jpegxl_xfail_reason(_RATIO_SHAPE, dtype)
-    if reason is not None:
-        pytest.xfail(reason)
-
-    # JPEGXL with floats requires quantize_level=0 (lossless float), but RICE uses
-    # default quantize_level=16 (lossy quantization to int32). Comparing lossless
-    # float JPEGXL against lossy-quantized RICE is not meaningful; xfail these cases.
-    if compression_type == "JPEGXL" and np.issubdtype(dtype, np.floating):
-        pytest.xfail("Ratio comparison between lossless-float JPEGXL and lossy-quantized RICE is not meaningful")
-
+def test_better_ratio_than_rice(dtype):
+    """JPEG-LS must compress a 1024x1024 array better than RICE_1."""
     data = make_data(_RATIO_SHAPE, dtype)
-    _, jpeg_size = compress_decompress(data, compression_type)
+    _, jpeg_size = compress_decompress(data, "JPEGLS")
     _, rice_size = compress_decompress(data, "RICE_1")
     assert jpeg_size < rice_size, (
-        f"{compression_type} ({dtype.__name__}) compressed size {jpeg_size} "
+        f"JPEGLS ({dtype.__name__}) compressed size {jpeg_size} "
         f"is NOT smaller than RICE_1 size {rice_size}"
     )

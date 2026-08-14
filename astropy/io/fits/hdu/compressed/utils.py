@@ -92,7 +92,7 @@ def _validate_tile_shape(*, tile_shape, compression_type, image_header):
         if 0 < remain < 4:
             raise ValueError("Last tile along 2nd dimension has less than 4 pixels")
             
-    elif compression_type in ("JPEGLS", "JPEGXL"):
+    elif compression_type == "JPEGLS":
         if tile_shape:
             major_dims = len([ts for ts in tile_shape if ts > 1])
             if major_dims > 2:

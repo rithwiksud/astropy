@@ -39,7 +39,6 @@ from .settings import (
     DITHER_SEED_CHECKSUM,
     DITHER_SEED_CLOCK,
     DEFAULT_NEAR_LOSSLESS_MAXERR,
-    DEFAULT_JPEGXL_EFFORT,
 )
 
 __all__ = ["CompImageHDU"]
@@ -66,7 +65,6 @@ class CompImageHDU(ImageHDU):
         dither_seed=DEFAULT_DITHER_SEED,
         do_not_scale_image_data=False,
         jpegls_maxerr=DEFAULT_NEAR_LOSSLESS_MAXERR,
-        jpegxl_effort=DEFAULT_JPEGXL_EFFORT,
         uint=True,
         scale_back=None,
         bintable=None,
@@ -329,9 +327,6 @@ class CompImageHDU(ImageHDU):
             self.jpegls_maxerr = _get_compression_setting(
                 bintable.header, "MAXERR", DEFAULT_NEAR_LOSSLESS_MAXERR
             )
-            self.jpegxl_effort = _get_compression_setting(
-                bintable.header, "EFFORT", DEFAULT_JPEGXL_EFFORT
-            )
 
         else:
             # Create at least a skeleton HDU that matches the input
@@ -360,7 +355,6 @@ class CompImageHDU(ImageHDU):
             self.quantize_method = quantize_method
             self.dither_seed = dither_seed
             self.jpegls_maxerr = jpegls_maxerr
-            self.jpegxl_effort = jpegxl_effort
 
             # TODO: just for parameter validation, e.g. tile shape - we shouldn't
             # ideally need this and should instead validate the values as they are
@@ -461,7 +455,6 @@ class CompImageHDU(ImageHDU):
             hcomp_scale=self.hcomp_scale,
             hcomp_smooth=self.hcomp_smooth,
             jpegls_maxerr=self.jpegls_maxerr,
-            jpegxl_effort=self.jpegxl_effort,
             quantize_level=self.quantize_level,
             quantize_method=self.quantize_method,
             dither_seed=self.dither_seed,

@@ -5,7 +5,7 @@ This module contains the FITS compression algorithms in numcodecs style Codecs.
 from gzip import compress as gzip_compress
 from gzip import decompress as gzip_decompress
 try:
-    from imagecodecs import jpegls_decode, jpegls_encode, jpegxl_decode, jpegxl_encode
+    from imagecodecs import jpegls_decode, jpegls_encode
 
     HAS_IMAGECODECS = True
 except ImportError:
@@ -22,9 +22,7 @@ from astropy.io.fits.hdu.compressed._compression import (
     decompress_rice_1_c,
 )
 
-from .settings import DEFAULT_NEAR_LOSSLESS_MAXERR, DEFAULT_JPEGXL_EFFORT
-
-from ._quantization import quantize_integer_arr
+from .settings import DEFAULT_NEAR_LOSSLESS_MAXERR
 
 # If numcodecs is installed, we use Codec as a base class for the codecs below
 # so that they can optionally be used as codecs in any package relying on
@@ -47,7 +45,6 @@ __all__ = [
     "NoCompress",
     "Rice1",
     "JPEGLS",
-    "JPEGXL",
 ]
 
 
@@ -688,108 +685,3 @@ class JPEGLS(Codec):
             + lower_stream
         )
 
-
-class JPEGXL(Codec):
-    """
-    The JPEG XL (ISO/IEC 18181) image compression format, designed as a universal 
-    successor to JPEG. JPEG XL offers state-of-the-art compression with both lossless 
-    and lossy modes, supporting high dynamic range, wide color gamut, and high bit depth 
-    images. The format uses a modular transform coding architecture with advanced 
-    features like progressive decoding, alpha channel support, and animation.
-
-    The algorithm employs adaptive prediction, variable DCT transforms, context modeling,
-    and entropy coding using ANS (Asymmetric Numeral Systems). It achieves superior 
-    compression ratios compared to other formats while maintaining high visual quality
-    and fast encoding/decoding speeds. JPEG XL is particularly well-suited for both 
-    photographic and synthetic images across web, professional, and archival use cases.
-    
-    Can compress both int and float data.
-
-    Parameters
-    ----------
-    max_err
-        The near-lossless maximum error parameter. When set to 0, the compression
-        is fully lossless, meaning the decompressed image will be bit-for-bit
-        identical to the original. Values greater than 0 enable near-lossless
-        compression, where each reconstructed sample differs from the original by
-        no more than the specified error value. Default value is 0. Only works for
-        integer data.
-
-    effort
-       Controls the encoder effort level (1-9). Higher values enable more thorough
-       compression techniques at the cost of slower encoding. Default is 7.
-
-    References
-    ----------
-       [1] Alakuijala, J., et al. (2019). JPEG XL Next-Generation Image Compression 
-           Architecture and Coding Tools. Proc. SPIE 11137, Applications of Digital
-           Image Processing XLII.
-       [2] Rhatushnyak, A., & Wassenberg, J. (2020). The Design of JPEG XL. 
-           Proceedings of the Picture Coding Symposium (PCS).
-    """
-
-    codec_id = "JPEGXL"
-
-    def __init__(self, *, effort: int = DEFAULT_JPEGXL_EFFORT, max_err: int = DEFAULT_NEAR_LOSSLESS_MAXERR, quantization_mask: np.ndarray = None):
-        if not HAS_IMAGECODECS:
-            raise ImportError(
-                "The 'imagecodecs' package is required for JPEG-XL compression. "
-                "Install it with: pip install imagecodecs"
-            )
-        self.max_err = max_err
-        self.effort = effort
-        self.quantization_mask = quantization_mask
-
-    def decode(self, buf):
-        """
-        Decompress buffer using the JPEG-LS algorithm.
-
-        Parameters
-        ----------
-        buf : bytes or array_like
-            The buffer to decompress.
-
-        Returns
-        -------
-        buf : np.ndarray
-            The decompressed buffer.
-        """
-        cbytes = np.frombuffer(_as_native_endian_array(buf), dtype=np.uint8).tobytes()
-        return jpegxl_decode(cbytes)
-
-    def encode(self, buf):
-        """
-        Compress the data in the buffer using the JPEG-LS algorithm.
-
-        Parameters
-        ----------
-        buf : bytes or array_like
-            The buffer to compress.
-
-        Returns
-        -------
-        bytes
-            The compressed bytes.
-        """
-
-        if buf.dtype == np.int16:
-            # Arithmetic conversion to unsigned: same method as CFITSIO (+32768)
-            buf = (buf.astype(np.int32) + 32768).astype(np.uint16)
-        elif buf.dtype == np.int8:
-            buf = (buf.astype(np.int16) + 128).astype(np.uint8)
-
-        if self.max_err > 0:
-            if buf.dtype == np.uint8:
-                nbits = 8
-            elif buf.dtype == np.uint16:
-                nbits = 16
-            else:
-                raise RuntimeError("JPEG-XL near-lossless mode can only compress integer data. Set max_error=0 to compress floats.")
-
-            buf = quantize_integer_arr(buf, self.max_err, self.quantization_mask, nbits)
-
-        # Squeeze leading size-1 dimensions so imagecodecs sees a 2D image
-        buf = np.squeeze(buf)
-        if buf.ndim < 2:
-            buf = buf.reshape(1, -1)
-        return jpegxl_encode(buf, lossless=True, effort=self.effort)
