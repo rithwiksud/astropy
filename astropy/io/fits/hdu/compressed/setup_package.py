@@ -21,10 +21,5 @@ def get_extensions():
                 os.path.join("cextern", "cfitsio", "lib", "quantize.c"),
             ],
             include_dirs=[SRC_DIR],
-            # Disable floating-point contraction so dequantization
-            # (q * scale + zero) rounds identically to CFITSIO builds:
-            # an FMA here changes the last bit of decompressed floats and
-            # breaks cross-tool byte identity.
-            extra_compile_args=["-ffp-contract=off"],
         )
     ]
