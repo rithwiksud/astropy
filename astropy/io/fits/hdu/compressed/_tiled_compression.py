@@ -549,6 +549,11 @@ def compress_image_data(
                 tile_data = (tile_data.astype(np.int64) - 2**31).astype(np.int32)
             elif tile_data.dtype.itemsize == 2:
                 tile_data = (tile_data.astype(np.int32) - 2**15).astype(np.int16)
+        elif tile_data.dtype.kind == "i" and tile_data.dtype.itemsize == 1:
+            # BITPIX=8 is natively unsigned in FITS; a signed int8 array is
+            # the BZERO=-128 pseudo-integer convention, so the raw on-disk
+            # (and therefore pre-codec) representation is physical + 128.
+            tile_data = (tile_data.astype(np.int16) + 128).astype(np.uint8)
 
         settings = _update_tile_settings(settings, compression_type, tile_data.shape)
 
