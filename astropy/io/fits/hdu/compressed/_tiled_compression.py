@@ -86,6 +86,13 @@ def _header_to_settings(header):
         settings["smooth"] = _get_compression_setting(header, "SMOOTH", 0)
     elif compression_type == "JPEGLS":
         settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_NEAR_LOSSLESS_MAXERR)
+        settings["bitpix"] = header["ZBITPIX"]
+        # The null marker: quantized floats use the fixed ZBLANK value that
+        # NaN pixels are mapped to; integer images use BLANK if defined.
+        if header["ZBITPIX"] < 0:
+            settings["zblank"] = DEFAULT_ZBLANK
+        else:
+            settings["zblank"] = header.get("ZBLANK", header.get("BLANK"))
     elif compression_type == "JPEGXL":
         settings["effort"] = _get_compression_setting(header, "EFFORT", DEFAULT_JPEGXL_EFFORT)
         settings["max_err"] = _get_compression_setting(header, "MAXERR", DEFAULT_NEAR_LOSSLESS_MAXERR)

@@ -498,13 +498,55 @@ class JPEGLS(Codec):
 
     codec_id = "JPEGLS"
 
-    def __init__(self, *, max_err: int = DEFAULT_NEAR_LOSSLESS_MAXERR):
+    def __init__(
+        self,
+        *,
+        max_err: int = DEFAULT_NEAR_LOSSLESS_MAXERR,
+        bitpix: int = None,
+        zblank: int = None,
+    ):
         if not HAS_IMAGECODECS:
             raise ImportError(
                 "The 'imagecodecs' package is required for JPEG-LS compression. "
                 "Install it with: pip install imagecodecs"
             )
         self.max_err = max_err
+        self.bitpix = bitpix
+        self.zblank = zblank
+
+    @staticmethod
+    def _stream_near(stream):
+        """
+        Return the NEAR parameter recorded in a JPEG-LS codestream.
+
+        NEAR is stored in the SOS marker segment, so a decoder needs no
+        external metadata to tell lossless from near-lossless streams.
+        """
+        i = 2  # skip the SOI marker
+        while i + 4 <= len(stream):
+            if stream[i] != 0xFF:
+                break
+            if stream[i + 1] == 0xDA:  # SOS
+                ncomponents = stream[i + 4]
+                return stream[i + 5 + 2 * ncomponents]
+            i += 2 + ((stream[i + 2] << 8) | stream[i + 3])
+        raise ValueError("Invalid JPEG-LS codestream: no SOS marker found")
+
+    @staticmethod
+    def _encode_stream(buf, max_err):
+        """Encode one uint8/uint16 plane as a JPEG-LS codestream."""
+        # CFITSIO passes the tile to CharLS as a 2D frame when the tile is
+        # 2D, and as a single row otherwise; mirror that so the codestreams
+        # are interchangeable.
+        buf = np.squeeze(buf)
+        if buf.ndim != 2:
+            buf = buf.reshape(1, -1)
+        # JPEG-LS can *expand* incompressible data (by up to 6.25% plus
+        # header overhead), and imagecodecs' default output buffer is too
+        # small for that; preallocate the guaranteed worst case instead
+        # (same bound as CFITSIO's imcomp_jpegls_max_encoded_size).
+        out = bytearray(buf.nbytes + buf.nbytes // 16 + 1024)
+        return bytes(jpegls_encode(buf, level=max_err, out=out))
 
     def decode(self, buf):
         """
@@ -520,8 +562,45 @@ class JPEGLS(Codec):
         buf : np.ndarray
             The decompressed buffer.
         """
-        cbytes = np.frombuffer(_as_native_endian_array(buf), dtype=np.uint8).tobytes()
-        return jpegls_decode(cbytes)
+        cbytes = np.frombuffer(buf, dtype=np.uint8).tobytes()
+
+        if self.bitpix not in (32, -32, -64):
+            # uint8/uint16 samples decode directly; the +32768 offset for
+            # 16-bit data is undone by the caller (_finalize_array).
+            return jpegls_decode(cbytes)
+
+        # 32-bit split container (matches CFITSIO): an 8-byte header -- the
+        # 4-byte big-endian length of the high-plane stream, then the 4-byte
+        # big-endian tile baseline -- followed by the high- and low-plane
+        # JPEG-LS streams.
+        if len(cbytes) < 8:
+            raise ValueError("Invalid JPEG-LS stream for 32-bit tile")
+        upper_len = int.from_bytes(cbytes[0:4], "big")
+        baseline = int.from_bytes(cbytes[4:8], "big")
+        if upper_len > len(cbytes) - 8:
+            raise ValueError(
+                "Corrupted JPEG-LS 32-bit tile: upper length exceeds data"
+            )
+
+        lower_stream = cbytes[8 + upper_len :]
+        split = jpegls_decode(lower_stream).astype(np.uint32).ravel()
+        if upper_len > 0:
+            upper = jpegls_decode(cbytes[8 : 8 + upper_len]).astype(np.uint32)
+            split |= upper.ravel() << 16
+        # upper_len == 0 means the encoder found an identically-zero upper
+        # plane (tile range fit in 16 bits after the rebase) and stored no
+        # stream for it.
+
+        # Near-lossless guard: NEAR error in the low plane can push
+        # (split + baseline) past 2^32-1 for values near the top of the
+        # range; saturate instead of wrapping, which stays within the NEAR
+        # bound.  Lossless tiles skip the guard: their modulo-2^32
+        # arithmetic is exact and wrapped null-marker pixels depend on it.
+        if self._stream_near(lower_stream) > 0:
+            split = np.minimum(split, np.uint32(0xFFFFFFFF) - np.uint32(baseline))
+
+        uval = split + np.uint32(baseline)  # wraps modulo 2^32, as intended
+        return (uval.astype(np.int64) - 0x80000000).astype(np.int32)
 
     def encode(self, buf):
         """
@@ -537,17 +616,77 @@ class JPEGLS(Codec):
         bytes
             The compressed bytes.
         """
-        if buf.dtype == np.int16:
+        buf = _as_native_endian_array(buf)
+
+        # Null pixels must survive compression exactly: near-lossless coding
+        # may perturb any value by up to NEAR, turning nulls into
+        # valid-looking values and valid pixels within NEAR of the marker
+        # into false nulls.  Any tile containing the marker is therefore
+        # encoded losslessly (NEAR is per-codestream, so decoders handle a
+        # mix of lossless and near-lossless tiles automatically).
+        max_err = self.max_err
+        if max_err > 0 and self.zblank is not None and np.any(buf == self.zblank):
+            max_err = 0
+
+        if buf.dtype == np.uint8:
+            return self._encode_stream(buf, max_err)
+        elif buf.dtype == np.int16:
             # Arithmetic conversion to unsigned: same method as CFITSIO (+32768)
-            buf = (buf.astype(np.int32) + 32768).astype(np.uint16)
-        elif buf.dtype == np.int8:
-            buf = (buf.astype(np.int16) + 128).astype(np.uint8)
-        assert buf.dtype in (np.uint16, np.uint8), "JPEG-LS can only compress 8/16-bit integer data."
-        # Squeeze leading size-1 dimensions so imagecodecs sees a 2D image
-        buf = np.squeeze(buf)
-        if buf.ndim < 2:
-            buf = buf.reshape(1, -1)
-        return jpegls_encode(buf, level=self.max_err)
+            return self._encode_stream(
+                (buf.astype(np.int32) + 32768).astype(np.uint16), max_err
+            )
+        elif buf.dtype == np.int32:
+            return self._encode_int32(buf, max_err)
+        else:
+            raise ValueError(
+                "JPEG-LS only supports 8, 16, or split 32-bit integer tiles, "
+                f"got {buf.dtype}"
+            )
+
+    def _encode_int32(self, buf, max_err):
+        """
+        Encode an int32 tile as the CFITSIO JPEG-LS 32-bit split container.
+
+        The 2^31-offset value is rebased to the tile's own minimum (so the
+        16-bit plane split tracks the tile's local range rather than fixed
+        65536 boundaries), then split into high and low 16-bit planes, each
+        an independent JPEG-LS stream.  Layout: 4-byte big-endian high-plane
+        length, 4-byte big-endian baseline, high stream, low stream.
+        """
+        uval = (buf.astype(np.int64) + 0x80000000).astype(np.uint32)
+
+        # Null-marker pixels are excluded from the baseline: the marker is a
+        # huge negative reserved value, and letting it set the baseline would
+        # forfeit the rebase.  Excluded pixels wrap modulo 2^32 in the split,
+        # which the decoder's modulo-2^32 reconstruction recovers exactly
+        # (such tiles are always encoded losslessly, see encode()).
+        if self.zblank is not None:
+            valid = uval[buf != self.zblank]
+            if valid.size > 0:
+                baseline = int(valid.min())
+            else:  # every pixel is null; any baseline is exact
+                baseline = int(np.uint32(np.int64(self.zblank) + 0x80000000))
+        else:
+            baseline = int(uval.min())
+
+        rebased = uval - np.uint32(baseline)  # wraps modulo 2^32, as intended
+        upper = (rebased >> 16).astype(np.uint16)
+        lower = (rebased & 0xFFFF).astype(np.uint16)
+
+        # The high plane MUST be encoded losslessly: an error of 1 there
+        # becomes 65536 in the reconstructed value.  NEAR on the low plane
+        # alone keeps the total absolute error within max_err.  An
+        # identically-zero high plane (tile range fit in 16 bits after the
+        # rebase) is signalled with upper_len = 0 instead of a stream.
+        upper_stream = b"" if not upper.any() else self._encode_stream(upper, 0)
+        lower_stream = self._encode_stream(lower, max_err)
+
+        return (
+            len(upper_stream).to_bytes(4, "big")
+            + baseline.to_bytes(4, "big")
+            + upper_stream
+            + lower_stream
+        )
 
 
 class JPEGXL(Codec):
