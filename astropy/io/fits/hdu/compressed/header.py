@@ -504,6 +504,14 @@ def _image_header_to_empty_bintable(
         after_keyword = "ZVAL2"
         idx = 3
     elif compression_type == "JPEGLS":
+        # Near-lossless on floats would compound with the quantization step,
+        # making the error in physical units unpredictable; lossless JPEG-LS
+        # of floats (via quantization) is supported.
+        if image_header["BITPIX"] < 0 and jpegls_maxerr is not None and jpegls_maxerr > 0:
+            raise ValueError(
+                "Near-lossless JPEG-LS compression (jpegls_maxerr > 0) of "
+                "floating point images is not supported; use jpegls_maxerr=0"
+            )
         bintable.header.set(
             "ZNAME1", "MAXERR", "maximum per-pixel error", after=after_keyword
         )
